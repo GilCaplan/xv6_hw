@@ -23,6 +23,7 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int lsproc(void);
 int halt(void);
 
 // ulib.c
