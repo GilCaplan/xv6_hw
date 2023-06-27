@@ -5,7 +5,9 @@ static double x=0;
 
 
 int set_priority(int prio);
-
+int set_priority(int prio){
+	return setpriority(prio);
+}
 /*
  fork several several processes, with different priorities, and let them run.
 The pattern (in prio_keys[] ):
