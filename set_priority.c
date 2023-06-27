@@ -1,8 +1,8 @@
+//is not needed
+// int set_priority(int prio)
+// {
 
-int set_priority(int prio)
-{
-
-    // TODO: replace the content of this function
-    return 0;
-}
+//     // TODO: replace the content of this function
+//     return 0;
+// }
 
