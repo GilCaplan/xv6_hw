@@ -6,7 +6,6 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
-
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -88,7 +87,10 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-
+  
+  //addition
+  p->priority = 1;
+  p->ctime = ticks;
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -319,41 +321,98 @@ wait(void)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
-void
-scheduler(void)
+
+void scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
+
+  struct proc *high_prio_proc;
+  int rank[3] = {0};
   
-  for(;;){
+  acquire(&ptable.lock);
+  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+	if(p->priority >= 0 && p->priority < 3){
+	   p->rank = rank[p->priority]++;
+	}
+     }
+  release(&ptable.lock);
+
+  for (;;)
+  {
     // Enable interrupts on this processor.
     sti();
-
-    // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
+	
+    // Find a runnable process with the highest priority
+    high_prio_proc = 0;
+    for (p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+    {
+      if (p->state != RUNNABLE)
         continue;
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
+      if (high_prio_proc == 0 || p->priority > high_prio_proc->priority)
+        high_prio_proc = p;
+      else if(p->priority == high_prio_proc->priority && p->rank < high_prio_proc->rank)
+              high_prio_proc = p;
+      }
 
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
+    if (high_prio_proc != 0)
+    {
+      int check_value = 1;
 
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
+      // Update time slice based on priority
+      if (high_prio_proc->ctime == 0)
+      {
+        if (high_prio_proc->priority == 2)
+          high_prio_proc->ctime = 8;
+        else if (high_prio_proc->priority == 1)
+          high_prio_proc->ctime = 16;
+        else if (high_prio_proc->priority == 0)
+          high_prio_proc->ctime = 32;
+      }
+
+      // Run the process until it finishes its time slice or is no longer runnable
+      while (high_prio_proc->ctime > 0 && high_prio_proc->state == RUNNABLE && check_value)//check value tells us if it gets pre-empted
+      {
+       
+        // Decrease time slice every tick
+        high_prio_proc->ctime--;
+   
+        c->proc = high_prio_proc;//runs process for one tick?
+        switchuvm(high_prio_proc);
+	high_prio_proc->state = RUNNING;
+        swtch(&(c->scheduler), high_prio_proc->context);
+        switchkvm();
+                
+        c->proc = 0;
+	// Process is done running for now
+        // Check for processes with higher priority
+        if(high_prio_proc->ctime == 0){//do rr
+	   high_prio_proc->rank = rank[high_prio_proc->priority]++;
+           check_value = 0;
+	   break;
+	}
+	//if process voluntarily relinquishes the CPU before its time-slice expires at a particular priority level, its time-slice is reset
+	//how to implement, i know ithat it updates it's state when it finishes to run
+	
+	for (p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+        {
+             if (p->priority > high_prio_proc->priority && p->state == RUNNABLE)//process won't get preempted by process in same or lower priority
+             {
+		//preempted by process that is ready to run
+           	 check_value = 0;
+            	 break;
+             }
+        }
+      }
     }
-    release(&ptable.lock);
 
+    release(&ptable.lock);
   }
 }
+
 
 // Enter scheduler.  Must hold only ptable.lock
 // and have changed proc->state. Saves and restores
@@ -531,4 +590,35 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+//addition
+int
+setpriority(int prio){
+  struct proc *curproc = myproc();
+  acquire(&ptable.lock);
+
+  if(prio>2 || prio<0){return 1;}
+  if(prio==0)
+  {
+    curproc->priority=0;
+    curproc->ctime=8;
+  }
+  if(prio==1)
+  {
+    curproc->priority=1;
+    curproc->ctime=16 ;
+  }
+  if(prio==0)
+  {
+    curproc->priority=0;
+    curproc->ctime=32 ;
+  }
+
+  curproc->state=RUNNABLE;
+  sched();
+
+  release(&ptable.lock);
+  return 22;
+
 }
