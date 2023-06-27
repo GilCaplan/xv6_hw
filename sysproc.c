@@ -97,4 +97,8 @@ sys_halt(void)
   return 0;
 }
 
-
+int
+sys_lsproc(void)
+{
+	return lsproc();
+}
