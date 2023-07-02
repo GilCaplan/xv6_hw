@@ -25,6 +25,7 @@ int sleep(int);
 int uptime(void);
 int halt(void);
 int setpriority(int);
+int checkRelinquished(int*, int*, int*, int*);//addition
 // ulib.c
 int stat(const char*, struct stat*);
 char* strcpy(char*, const char*);
