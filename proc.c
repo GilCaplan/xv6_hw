@@ -385,14 +385,6 @@ scheduler(void)
   struct cpu *c = mycpu();
   c->proc = 0;
   struct proc *high_prio_proc;
-  int rank[3] = {0};
-  acquire(&ptable.lock);
-  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-	if(p->priority >= 0 && p->priority < 3){
-	   p->rank = rank[p->priority]++;
-	}
-     }
-  release(&ptable.lock);
 
   for(;;){
     // Enable interrupts on this processor.
@@ -445,10 +437,6 @@ scheduler(void)
                    if (high_prio_proc != p && p->state == RUNNABLE)
                         p->wticks++;
              }
-	// Check for processes with higher priority
-        if(high_prio_proc->ctime == 0){//do rr
-	   high_prio_proc->rank = rank[high_prio_proc->priority]++;
-	}
 
            //pre-empt if applicable
           for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
