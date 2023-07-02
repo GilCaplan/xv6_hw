@@ -21,4 +21,5 @@
 #define SYS_mkdir  20
 #define SYS_close  21
 #define SYS_setpriority  22
+#define SYS_checkRelinquished 23
 #define SYS_halt   50
