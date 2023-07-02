@@ -6,6 +6,8 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+
+#define COLLECT_PROC_TIMING
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -88,9 +90,13 @@ found:
   p->state = EMBRYO;
   p->pid = nextpid++;
   
-  //addition
+  //additions
   p->priority = 1;
   p->ctime = ticks;
+  p->wticks = 0;//wait time
+  p->rticks = 0;//run time
+  p->IOticks = 0;//IO input/output ticks
+  //additions
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -232,7 +238,6 @@ exit(void)
   struct proc *curproc = myproc();
   struct proc *p;
   int fd;
-
   if(curproc == initproc)
     panic("init exiting");
 
@@ -313,6 +318,60 @@ wait(void)
   }
 }
 
+int
+checkRelinquished(int *wticks, int *rticks, int *IOticks, int* alive_ticks)
+{
+  struct proc *p;
+  int haschild, pid;
+  struct proc *curproc = myproc();
+  
+  acquire(&ptable.lock);
+  for(;;){
+    // Scan through table looking for exited children.
+    haschild = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->parent != curproc)
+        continue;
+      haschild = 1;
+      if(p->state == ZOMBIE){
+		  
+        *wticks =  p->wticks;
+        *rticks =  p->rticks;
+        *IOticks = p->IOticks;
+        *alive_ticks = *wticks + *rticks + *IOticks; 
+        pid = p->pid;
+        kfree(p->kstack);
+        p->kstack = 0;
+        freevm(p->pgdir);
+
+        p->name[0] = 0;
+        p->pid = 0;
+        p->parent = 0;
+        p->killed = 0;
+		
+        p->ctime = 0;
+        p->wticks = 0;
+        p->rticks = 0;
+        p->IOticks = 0;
+		
+        p->priority = 0;
+        p->state = UNUSED;
+        release(&ptable.lock);
+        return pid;
+      }
+    }
+
+    // No point waiting if we don't have any children.
+    if(!haschild || curproc->killed){
+      release(&ptable.lock);
+      return -1;
+    }
+
+    // Wait for children to exit.  (See wakeup1 call in proc_exit.)
+    sleep(curproc, &ptable.lock);  //DOC: wait-sleep
+  }
+}
+
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
@@ -374,20 +433,32 @@ void scheduler(void)
       }
 
       // Run the process until it finishes its time slice or is no longer runnable
-      while (high_prio_proc->ctime > 0 && high_prio_proc->state == RUNNABLE && check_value)//check value tells us if it gets pre-empted
+      while (high_prio_proc->ctime != 0 && high_prio_proc->state == RUNNABLE && check_value)//check value tells us if it gets pre-empted
       {
-       
-        // Decrease time slice every tick
-        high_prio_proc->ctime--;
-   
+          
         c->proc = high_prio_proc;//runs process for one tick?
-        switchuvm(high_prio_proc);
+#ifdef COLLECT_PROC_TIMING
+            high_prio_proc->rticks++;
+            high_prio_proc->ctime--;
+#endif //COLLECT_PROC_TIMING        
+
+	switchuvm(high_prio_proc);
+
 	high_prio_proc->state = RUNNING;
+
         swtch(&(c->scheduler), high_prio_proc->context);
-        switchkvm();
-                
+        switchkvm();	
+
         c->proc = 0;
-	// Process is done running for now
+	// Process is done running for now, should change state
+
+	for (p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+                   if (high_prio_proc != p && p->state == RUNNABLE)
+                        p->wticks++;
+                   if (p->state == SLEEPING)
+                        p->IOticks++;
+             }
+
         // Check for processes with higher priority
         if(high_prio_proc->ctime == 0){//do rr
 	   high_prio_proc->rank = rank[high_prio_proc->priority]++;
@@ -396,7 +467,6 @@ void scheduler(void)
 	}
 	//if process voluntarily relinquishes the CPU before its time-slice expires at a particular priority level, its time-slice is reset
 	//how to implement, i know ithat it updates it's state when it finishes to run
-	
 	for (p = ptable.proc; p < &ptable.proc[NPROC]; p++)
         {
              if (p->priority > high_prio_proc->priority && p->state == RUNNABLE)//process won't get preempted by process in same or lower priority
@@ -497,7 +567,6 @@ sleep(void *chan, struct spinlock *lk)
   // Go to sleep.
   p->chan = chan;
   p->state = SLEEPING;
-
   sched();
 
   // Tidy up.
